@@ -1,4 +1,5 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { Buffer } from 'node:buffer'
+import { readFileSync, readdirSync, writeFileSync, copyFileSync } from 'node:fs'
 import * as path from 'node:path'
 
 const fastresumeFolderPath = process.env.HOME + '/.local/share/qBittorrent/BT_backup'
@@ -6,22 +7,49 @@ const dir = readdirSync(fastresumeFolderPath)
 
 const fileNames = dir.filter(x => x.endsWith('.fastresume'))
 
-for (const fileName of fileNames) {
+const Keys = {
+	TotalDownloaded: 'total_downloaded',
+	Name: 'name',
+}
 
-	const file = readFileSync(path.join(fastresumeFolderPath, fileName))
-	const parsedFile = file.toString().split(':')
-	const nameIndex = parsedFile.findIndex(x => x.startsWith('name'))
-	const name = parsedFile[nameIndex+1]
-	// console.log(parsedFile)
-	// console.log(nameIndex, parsedFile[nameIndex], parsedFile[nameIndex+1])
-	const totalDownloadedField = parsedFile.find(x => x.includes('total')).split('i')
-	const totalDownloaded = totalDownloadedField[1].split('e14')[0]
+function getEntryByName(buffer, keyName) {
+	const startIndex = buffer.indexOf(`:${keyName}`, 'utf8') + 1
+	const endIndex = buffer.indexOf(':', startIndex)
+		
+	return {
+		startIndex, // subarray().byteOffset does not equal startIndex... ytho?
+		endIndex,
+		byteArray: buffer.subarray(startIndex, endIndex),
+	}
+}
 
-	console.log(name)
+function getEntryAtByteIndex(buffer, byteIndex) {
+	const startIndex = buffer.subarray(0, byteIndex).lastIndexOf(':', 'utf8') + 1
+	const endIndex = buffer.indexOf(':', startIndex)
+	return buffer.subarray(startIndex, endIndex)
+}
+
+function updateFile(fileName) {
+	const filePath = path.join(fastresumeFolderPath, fileName)
+	const fileData = readFileSync(filePath)
+	const totalDownloadedArray = getEntryByName(fileData, Keys.TotalDownloaded)
+	const nameArray = getEntryByName(fileData, Keys.Name)
+	const nameValueArray = getEntryAtByteIndex(fileData, nameArray.endIndex + 1)
+	
 	console.log(fileName)
-	console.log('totalDownloaded', totalDownloaded)
+	console.log(nameValueArray.toString())
+	console.log(totalDownloadedArray.byteArray.toString())
 	console.log()
-	console.log()
-	// break
+	
+	const firstChunk = fileData.subarray(0, totalDownloadedArray.startIndex)
+	const secondChunk = fileData.subarray(totalDownloadedArray.endIndex)
+	
+	const newFileData = Buffer.concat([firstChunk, Buffer.from('total_downloadedi0e14'), secondChunk])
+	
+	copyFileSync(filePath, path.join(fastresumeFolderPath, `${fileName}.backup.${new Date().getTime()}`))
+	writeFileSync(filePath, newFileData)
+}
 
+for (const fileName of fileNames) {
+	updateFile(fileName)
 }
